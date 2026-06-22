@@ -147,6 +147,16 @@ function esc(s) {
   return (s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
 
+// 쉼표로 구분된 태그 문자열 → 태그 칩 HTML
+function tagChips(str) {
+  return (str || "")
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .map((t) => `<span class="tag">${esc(t)}</span>`)
+    .join("");
+}
+
 function renderEntries(entries) {
   const box = $("#entries");
   if (!entries.length) {
@@ -242,6 +252,15 @@ $("#f-end").addEventListener("input", updateDurDisplay);
 function nowHM() {
   const d = new Date();
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+// 특정 Date를 "HH:MM"으로
+const hmOf = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+// 경과 밀리초 → "HH:MM:SS"
+function fmtElapsed(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return `${pad(h)}:${pad(m)}:${pad(s % 60)}`;
 }
 // 타이머: 버튼으로 시작/종료 시각을 현재 시각으로 찍는다. 입력칸은 그대로 수정 가능.
 $("#start-now").addEventListener("click", () => { $("#f-start").value = nowHM(); updateDurDisplay(); });
@@ -438,6 +457,112 @@ $("#delete-btn").addEventListener("click", async () => {
   }
 });
 
+// ===== 원클릭 전환 타이머 =====
+// 진행 중인 작업 하나를 추적한다. 다른 작업으로 전환/정지하면 그 구간이 일지로 자동 저장된다.
+let activeTimer = null;     // { title, project_id, tags, startedAt(ISO) }
+let timerInterval = null;
+const timerKey = () => `wl_timer_${currentUsername}`;
+
+function saveTimerState() {
+  try {
+    if (activeTimer) localStorage.setItem(timerKey(), JSON.stringify(activeTimer));
+    else localStorage.removeItem(timerKey());
+  } catch { /* 무시 */ }
+}
+function restoreTimer() {
+  try {
+    const raw = localStorage.getItem(timerKey());
+    activeTimer = raw ? JSON.parse(raw) : null;
+  } catch { activeTimer = null; }
+  renderTimer();
+  if (activeTimer) startTick();
+}
+function renderTimer() {
+  const running = !!activeTimer;
+  $("#timer-status").hidden = !running;
+  $("#timer-start").textContent = running ? "↻ 전환" : "▶ 시작";
+  $("#timer-title").placeholder = running ? "다음에 할 일 (입력 후 ↻ 전환)" : "지금 하는 일 (타이머 기록)";
+  if (running) {
+    $("#timer-now").textContent = activeTimer.title;
+    updateElapsed();
+  }
+}
+function updateElapsed() {
+  if (!activeTimer) return;
+  $("#timer-elapsed").textContent = fmtElapsed(Date.now() - new Date(activeTimer.startedAt).getTime());
+}
+function startTick() { stopTick(); timerInterval = setInterval(updateElapsed, 1000); }
+function stopTick() { if (timerInterval) { clearInterval(timerInterval); timerInterval = null; } }
+
+// 현재 진행 구간을 일지로 저장 (시작~지금)
+async function timerSaveCurrent() {
+  if (!activeTimer) return;
+  const start = new Date(activeTimer.startedAt);
+  const end = new Date();
+  await saveEntry({
+    work_date: fmt(end),
+    start_time: hmOf(start),
+    end_time: hmOf(end),
+    title: activeTimer.title,
+    content: "",
+    tags: activeTimer.tags || "",
+    project_id: activeTimer.project_id || null,
+  });
+}
+// 입력값으로 새 타이머 시작
+function timerBegin() {
+  const title = $("#timer-title").value.trim();
+  if (!title) { $("#timer-title").focus(); return false; }
+  activeTimer = {
+    title,
+    project_id: $("#timer-project").value || null,
+    tags: $("#timer-tags").value.trim(),
+    startedAt: new Date().toISOString(),
+  };
+  saveTimerState();
+  $("#timer-title").value = "";
+  $("#timer-tags").value = "";
+  $("#timer-project").value = "";
+  renderTimer();
+  startTick();
+  return true;
+}
+// 타이머로 일지가 쌓인 뒤 화면 갱신
+function afterTimerChange() {
+  refresh();
+  loadTags();
+  if (!$("#view-dash").hidden) renderDashboard();
+}
+
+$("#timer-start").addEventListener("click", async () => {
+  if (activeTimer) {
+    // 전환: 새 작업 제목이 있어야 함 (없으면 정지로 안내)
+    if (!$("#timer-title").value.trim()) {
+      alert("전환할 새 작업을 입력하세요. 지금 작업만 끝내려면 '정지'를 누르세요.");
+      $("#timer-title").focus();
+      return;
+    }
+    try { await timerSaveCurrent(); } catch (err) { alert("일지 저장 실패: " + err.message); return; }
+    activeTimer = null;
+    timerBegin();
+    afterTimerChange();
+  } else {
+    timerBegin();
+  }
+});
+$("#timer-stop").addEventListener("click", async () => {
+  if (!activeTimer) return;
+  try { await timerSaveCurrent(); } catch (err) { alert("일지 저장 실패: " + err.message); return; }
+  activeTimer = null;
+  saveTimerState();
+  stopTick();
+  renderTimer();
+  afterTimerChange();
+});
+$("#timer-title").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); $("#timer-start").click(); }
+});
+
 // ===== 캘린더 / 일정 =====
 let calRef = new Date();           // 달력에 표시 중인 월
 let calSchedules = {};             // { 'YYYY-MM-DD': [ {id,title}, ... ] }
@@ -447,11 +572,11 @@ async function fetchSchedules(from, to) {
   if (!res.ok) throw new Error("일정 불러오기 실패");
   return res.json();
 }
-async function addSchedule(schedule_date, title, schedule_time = "", project_id = null) {
+async function addSchedule(schedule_date, title, schedule_time = "", project_id = null, tags = "") {
   const res = await fetch("/api/schedules", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ schedule_date, title, schedule_time, project_id }),
+    body: JSON.stringify({ schedule_date, title, schedule_time, project_id, tags }),
   });
   if (!res.ok) throw new Error((await res.json()).error || "일정 추가 실패");
   return res.json();
@@ -559,6 +684,7 @@ function openSched(date) {
   $("#s-title").value = "";
   $("#s-time").value = "";
   $("#s-project").value = "";
+  $("#s-tags").value = "";
   $("#s-title").focus();
 }
 function closeSched() { $("#sched-modal").hidden = true; }
@@ -578,7 +704,8 @@ function renderSchedList(date) {
       const tm = s.schedule_time ? `<span class="sched-time">${esc(s.schedule_time)}</span>` : "";
       const pname = projectName(s.project_id);
       const proj = pname ? `<span class="sched-proj">📁 ${esc(pname)}</span>` : "";
-      return `<li data-id="${s.id}">${tm}<span class="txt">${esc(s.title)}</span>${proj}${todoBtn}<button class="sched-edit">수정</button><button class="danger del-sched">삭제</button></li>`;
+      const tags = s.tags ? `<span class="sched-tags">${tagChips(s.tags)}</span>` : "";
+      return `<li data-id="${s.id}">${tm}<span class="txt">${esc(s.title)}</span>${proj}${tags}${todoBtn}<button class="sched-edit">수정</button><button class="danger del-sched">삭제</button></li>`;
     })
     .join("");
 }
@@ -602,16 +729,19 @@ $("#sched-form").addEventListener("submit", async (e) => {
   const title = $("#s-title").value.trim();
   const time = normalizeTime($("#s-time").value);
   const project_id = $("#s-project").value || null;
+  const tags = $("#s-tags").value.trim();
   if (!title) return;
   if (time === null) { alert("시간 형식이 올바르지 않습니다. 예: 14:30"); $("#s-time").focus(); return; }
   try {
-    await addSchedule(date, title, time, project_id);
+    await addSchedule(date, title, time, project_id, tags);
     $("#s-title").value = "";
     $("#s-time").value = "";
     $("#s-project").value = "";
+    $("#s-tags").value = "";
     await calRefresh();      // 서버에서 todo_count 포함해 다시 로드
     renderSchedList(date);   // 모달 목록도 갱신(연동 할일 반영)
     loadTodos();             // 자동 생성된 할일 반영
+    loadTags();              // 새 태그를 자동완성 목록에 반영
     $("#s-title").focus();
   } catch (err) {
     alert(err.message);
@@ -720,7 +850,7 @@ $("#sched-list").addEventListener("keydown", (e) => {
 });
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") { closeModal(); closeSched(); }
+  if (e.key === "Escape") { closeModal(); closeSched(); closePwModal(); closeTutorial(); }
 });
 
 // ===== 프로젝트 =====
@@ -741,7 +871,7 @@ function populateProjectSelects() {
     projects.filter((p) => p.status === "active")
       .map((p) => `<option value="${p.id}">${esc(p.name)}</option>`)
       .join("");
-  ["#f-project", "#t-project", "#s-project"].forEach((sel) => {
+  ["#f-project", "#t-project", "#s-project", "#timer-project"].forEach((sel) => {
     const el = $(sel);
     const cur = el.value;
     el.innerHTML = opts;
@@ -770,6 +900,7 @@ function renderProjects() {
             <button class="proj-toggle">${done ? "진행중으로" : "완료"}</button>
             <button class="proj-del danger">삭제</button>
           </div>
+          ${p.tags ? `<div class="project-tags">${tagChips(p.tags)}</div>` : ""}
           <div class="project-entries" hidden></div>
         </div>`;
     })
@@ -800,6 +931,7 @@ $("#project-form").addEventListener("submit", async (e) => {
   if (!name) return;
   const start_date = $("#p-start").value || "";
   const end_date = $("#p-end").value || "";
+  const tags = $("#p-tags").value.trim();
   if (start_date && end_date && end_date < start_date) {
     alert("종료일이 시작일보다 빠를 수 없습니다.");
     return;
@@ -808,12 +940,14 @@ $("#project-form").addEventListener("submit", async (e) => {
     await fetch("/api/projects", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, start_date, end_date }),
+      body: JSON.stringify({ name, start_date, end_date, tags }),
     });
     $("#p-name").value = "";
     $("#p-start").value = "";
     $("#p-end").value = "";
+    $("#p-tags").value = "";
     await loadProjects();
+    loadTags();
   } catch (err) {
     alert("프로젝트 추가 실패");
   }
@@ -1097,6 +1231,7 @@ document.querySelectorAll(".view-tab").forEach((t) =>
 
 // ===== 인증 / 시작 =====
 let authMode = "login";   // login | signup
+let currentUsername = "";
 
 function showAuth() {
   $(".app").hidden = true;
@@ -1108,6 +1243,7 @@ function showAuth() {
 function startApp(me) {
   $("#auth-screen").hidden = true;
   $(".app").hidden = false;
+  currentUsername = me.username;
   $("#current-user").textContent = me.username;
   $("#t-due").value = fmt(new Date());   // 할일 마감일 기본값: 당일
   loadProjects().then(() => {
@@ -1116,7 +1252,51 @@ function startApp(me) {
   });
   calRefresh();
   loadTags();
+  restoreTimer();        // 진행 중이던 타이머 복원
+  maybeShowTutorial();   // 첫 로그인이면 튜토리얼 안내
 }
+
+// ===== 첫 로그인 튜토리얼 =====
+const TUTORIAL_STEPS = [
+  { emoji: "📅", title: "달력에서 일정 관리", body: "달력의 날짜를 클릭하면 일정을 추가할 수 있어요. 시간·프로젝트·태그도 함께 적을 수 있고, 일정을 넣으면 같은 내용의 할일이 자동으로 등록됩니다." },
+  { emoji: "📝", title: "새 일지 작성", body: "달력 아래 '+ 새 일지' 버튼으로 그날 한 일을 기록하세요. 시작·종료 시간을 넣으면 소요 시간이 자동으로 계산되고, 프로젝트·태그·관련 할일도 연결할 수 있어요." },
+  { emoji: "📁", title: "프로젝트로 묶기", body: "관련된 업무를 프로젝트로 묶으면 프로젝트별 투입 시간을 한눈에 볼 수 있어요. 진행 기간과 태그도 기록됩니다." },
+  { emoji: "✅", title: "할 일 관리", body: "할 일을 '할 일 → 진행중 → 완료'로 옮기며 관리하세요. 일지·일정과 연동되어 자동으로 쌓입니다." },
+  { emoji: "📊", title: "대시보드로 돌아보기", body: "태그별·프로젝트별 투입 시간과 기간별 추이를 차트로 확인하세요. 주/월/분기/연 단위로 볼 수 있습니다. 그럼 시작해볼까요!" },
+];
+let tutStep = 0;
+const tutKey = () => `wl_tutorial_done_${currentUsername}`;
+
+function maybeShowTutorial() {
+  let done = false;
+  try { done = localStorage.getItem(tutKey()) === "1"; } catch { /* 무시 */ }
+  if (!done) openTutorial();
+}
+function renderTutStep() {
+  const s = TUTORIAL_STEPS[tutStep];
+  $("#tut-emoji").textContent = s.emoji;
+  $("#tut-title").textContent = s.title;
+  $("#tut-body").textContent = s.body;
+  $("#tut-dots").innerHTML = TUTORIAL_STEPS
+    .map((_, i) => `<span class="tut-dot ${i === tutStep ? "on" : ""}"></span>`)
+    .join("");
+  $("#tut-prev").disabled = tutStep === 0;
+  $("#tut-next").textContent = tutStep === TUTORIAL_STEPS.length - 1 ? "시작하기" : "다음";
+}
+function openTutorial() { tutStep = 0; renderTutStep(); $("#tutorial-modal").hidden = false; }
+function closeTutorial() { $("#tutorial-modal").hidden = true; }
+// neverAgain=true 이면 다음 로그인부터 다시 보지 않음
+function finishTutorial(neverAgain) {
+  if (neverAgain) { try { localStorage.setItem(tutKey(), "1"); } catch { /* 무시 */ } }
+  closeTutorial();
+}
+$("#tut-prev").addEventListener("click", () => { if (tutStep > 0) { tutStep--; renderTutStep(); } });
+$("#tut-next").addEventListener("click", () => {
+  if (tutStep < TUTORIAL_STEPS.length - 1) { tutStep++; renderTutStep(); }
+  else finishTutorial(true);   // 끝까지 보면 완료 처리
+});
+$("#tut-never").addEventListener("click", () => finishTutorial(true));
+$("#tutorial-modal").addEventListener("click", (e) => { if (e.target.id === "tutorial-modal") closeTutorial(); });
 
 $("#auth-toggle-btn").addEventListener("click", () => {
   authMode = authMode === "login" ? "signup" : "login";
@@ -1154,6 +1334,45 @@ $("#auth-form").addEventListener("submit", async (e) => {
 $("#logout-btn").addEventListener("click", async () => {
   await fetch("/api/auth/logout", { method: "POST" });
   location.reload();
+});
+
+// ===== 비밀번호 변경 =====
+function openPwModal() {
+  $("#pw-current").value = "";
+  $("#pw-new").value = "";
+  $("#pw-new2").value = "";
+  $("#pw-error").hidden = true;
+  $("#pw-modal").hidden = false;
+  $("#pw-current").focus();
+}
+function closePwModal() { $("#pw-modal").hidden = true; }
+
+$("#pw-btn").addEventListener("click", openPwModal);
+$("#pw-cancel").addEventListener("click", closePwModal);
+$("#pw-modal").addEventListener("click", (e) => { if (e.target.id === "pw-modal") closePwModal(); });
+
+$("#pw-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const cur = $("#pw-current").value;
+  const nw = $("#pw-new").value;
+  const nw2 = $("#pw-new2").value;
+  const errBox = $("#pw-error");
+  errBox.hidden = true;
+  if (nw.length < 4) { errBox.textContent = "새 비밀번호는 4자 이상이어야 합니다."; errBox.hidden = false; return; }
+  if (nw !== nw2) { errBox.textContent = "새 비밀번호가 일치하지 않습니다."; errBox.hidden = false; return; }
+  try {
+    const res = await fetch("/api/auth/change-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ current_password: cur, new_password: nw }),
+    });
+    if (!res.ok) throw new Error((await res.json()).error || "변경 실패");
+    closePwModal();
+    alert("비밀번호가 변경되었습니다.");
+  } catch (err) {
+    errBox.textContent = err.message;
+    errBox.hidden = false;
+  }
 });
 
 async function init() {

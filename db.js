@@ -116,6 +116,9 @@ export async function initDb() {
   if (!pnames.includes("end_date")) {
     await db.execute(`ALTER TABLE projects ADD COLUMN end_date TEXT NOT NULL DEFAULT ''`);
   }
+  if (!pnames.includes("tags")) {
+    await db.execute(`ALTER TABLE projects ADD COLUMN tags TEXT NOT NULL DEFAULT ''`);
+  }
 
   // todos 테이블 마이그레이션: 진행중 상태 + 일지/일정 연동 컬럼
   const tcols = await db.execute(`PRAGMA table_info(todos)`);
@@ -145,5 +148,8 @@ export async function initDb() {
   }
   if (!snames.includes("user_id")) {
     await db.execute(`ALTER TABLE schedules ADD COLUMN user_id INTEGER`);
+  }
+  if (!snames.includes("tags")) {
+    await db.execute(`ALTER TABLE schedules ADD COLUMN tags TEXT NOT NULL DEFAULT ''`);
   }
 }

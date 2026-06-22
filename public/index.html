@@ -30,9 +30,26 @@
       <h1>WORK LOG</h1>
       <div class="topbar-right">
         <span class="current-user" id="current-user"></span>
+        <button id="pw-btn">비밀번호 변경</button>
         <button id="logout-btn">로그아웃</button>
       </div>
     </header>
+
+    <section class="timer-bar" id="timer-bar">
+      <div class="timer-status" id="timer-status" hidden>
+        <span class="timer-dot"></span>
+        <span class="timer-now" id="timer-now"></span>
+        <span class="timer-elapsed" id="timer-elapsed">00:00:00</span>
+        <button id="timer-stop" class="danger">■ 정지</button>
+      </div>
+      <div class="timer-input">
+        <input type="text" id="timer-title" placeholder="지금 하는 일 (타이머 기록)" autocomplete="off" />
+        <select id="timer-project"><option value="">프로젝트 없음</option></select>
+        <input type="text" id="timer-tags" placeholder="태그" autocomplete="off" />
+        <button id="timer-start" class="primary">▶ 시작</button>
+      </div>
+      <div class="timer-hint">전환: 진행 중에 새 일을 입력하고 ↻ 전환 → 이전 작업이 자동으로 일지에 기록됩니다. 타이머 없이 기록하려면 아래 ‘＋ 새 일지’를 쓰세요.</div>
+    </section>
 
     <section class="calendar">
       <div class="cal-head">
@@ -85,6 +102,7 @@
         <input type="date" id="p-start" title="시작일" />
         <span class="p-date-sep">~</span>
         <input type="date" id="p-end" title="종료일" />
+        <input type="text" id="p-tags" placeholder="태그 (쉼표로 구분)" autocomplete="off" />
         <button type="submit" class="primary">프로젝트 추가</button>
       </form>
       <div id="projects-list" class="projects-list"></div>
@@ -211,6 +229,9 @@
         </div>
         <div class="row">
           <select id="s-project" class="s-project-input"><option value="">프로젝트 없음</option></select>
+        </div>
+        <div class="row">
+          <input type="text" id="s-tags" placeholder="태그 (쉼표로 구분)" autocomplete="off" />
           <button type="submit" class="primary">추가</button>
         </div>
         <div class="sched-hint">추가 시 같은 내용의 할일이 자동으로 등록됩니다.</div>
@@ -218,6 +239,46 @@
       <div class="modal-actions">
         <span class="spacer"></span>
         <button type="button" id="sched-close">닫기</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 비밀번호 변경 모달 -->
+  <div class="modal-backdrop" id="pw-modal" hidden>
+    <div class="modal">
+      <h2>비밀번호 변경</h2>
+      <form id="pw-form">
+        <label>현재 비밀번호
+          <input type="password" id="pw-current" autocomplete="current-password" required />
+        </label>
+        <label>새 비밀번호 <span class="hint">(4자 이상)</span>
+          <input type="password" id="pw-new" autocomplete="new-password" required />
+        </label>
+        <label>새 비밀번호 확인
+          <input type="password" id="pw-new2" autocomplete="new-password" required />
+        </label>
+        <div class="auth-error" id="pw-error" hidden></div>
+        <div class="modal-actions">
+          <span class="spacer"></span>
+          <button type="button" id="pw-cancel">취소</button>
+          <button type="submit" class="primary">변경</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 첫 로그인 튜토리얼 -->
+  <div class="modal-backdrop" id="tutorial-modal" hidden>
+    <div class="modal tutorial-box">
+      <div class="tut-emoji" id="tut-emoji"></div>
+      <h2 id="tut-title"></h2>
+      <p id="tut-body"></p>
+      <div class="tut-dots" id="tut-dots"></div>
+      <div class="modal-actions">
+        <button type="button" id="tut-never">다시 보지 않기</button>
+        <span class="spacer"></span>
+        <button type="button" id="tut-prev">이전</button>
+        <button type="button" id="tut-next" class="primary">다음</button>
       </div>
     </div>
   </div>

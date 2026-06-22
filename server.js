@@ -147,6 +147,28 @@ app.get("/api/auth/me", async (req, res) => {
   res.json({ id: u.id, username: u.username });
 });
 
+// 로그인 상태에서 비밀번호 변경 (현재 비밀번호 확인 후 교체)
+app.post("/api/auth/change-password", async (req, res) => {
+  try {
+    const user = await getSessionUser(req);
+    if (!user) return res.status(401).json({ error: "로그인이 필요합니다." });
+    const currentPassword = req.body.current_password || "";
+    const newPassword = req.body.new_password || "";
+    if (!currentPassword || !newPassword) return res.status(400).json({ error: "현재 비밀번호와 새 비밀번호를 입력하세요." });
+    if (newPassword.length < 4) return res.status(400).json({ error: "새 비밀번호는 4자 이상이어야 합니다." });
+    const r = await db.execute({ sql: "SELECT * FROM users WHERE id = ?", args: [user.id] });
+    const u = r.rows[0];
+    if (!u || !verifyPassword(currentPassword, u.salt, u.password_hash)) {
+      return res.status(401).json({ error: "현재 비밀번호가 올바르지 않습니다." });
+    }
+    const { salt, hash } = hashPassword(newPassword);
+    await db.execute({ sql: "UPDATE users SET password_hash = ?, salt = ? WHERE id = ?", args: [hash, salt, user.id] });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ===== 일지 ===== (모두 본인 데이터로 한정)
 // 기간 내 일지 목록 (from/to 는 YYYY-MM-DD, 선택값)
 app.get("/api/entries", async (req, res) => {
@@ -232,18 +254,21 @@ app.delete("/api/entries/:id", async (req, res) => {
 // 지금까지 사용한 태그 목록 (사용 횟수 내림차순) — 자동완성용
 app.get("/api/tags", async (req, res) => {
   try {
-    const result = await db.execute({
-      sql: "SELECT tags FROM entries WHERE tags <> '' AND user_id = ?",
-      args: [req.userId],
-    });
+    // 일지·프로젝트·일정의 태그를 모두 합쳐 공용 태그 목록을 만든다
     const counts = {};
-    result.rows.forEach((r) =>
-      (r.tags || "")
-        .split(",")
-        .map((t) => t.trim())
-        .filter(Boolean)
-        .forEach((t) => (counts[t] = (counts[t] || 0) + 1))
-    );
+    for (const tbl of ["entries", "projects", "schedules"]) {
+      const result = await db.execute({
+        sql: `SELECT tags FROM ${tbl} WHERE tags <> '' AND user_id = ?`,
+        args: [req.userId],
+      });
+      result.rows.forEach((r) =>
+        (r.tags || "")
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean)
+          .forEach((t) => (counts[t] = (counts[t] || 0) + 1))
+      );
+    }
     const tags = Object.entries(counts)
       .sort((a, b) => b[1] - a[1])
       .map(([name, count]) => ({ name, count }));
@@ -268,11 +293,11 @@ app.get("/api/projects", async (req, res) => {
 
 app.post("/api/projects", async (req, res) => {
   try {
-    const { name, start_date = "", end_date = "" } = req.body;
+    const { name, start_date = "", end_date = "", tags = "" } = req.body;
     if (!name) return res.status(400).json({ error: "프로젝트 이름은 필수입니다." });
     const result = await db.execute({
-      sql: "INSERT INTO projects (name, status, start_date, end_date, user_id, created_at) VALUES (?, 'active', ?, ?, ?, ?)",
-      args: [name, start_date, end_date, req.userId, now()],
+      sql: "INSERT INTO projects (name, status, start_date, end_date, tags, user_id, created_at) VALUES (?, 'active', ?, ?, ?, ?, ?)",
+      args: [name, start_date, end_date, tags, req.userId, now()],
     });
     const created = await db.execute({
       sql: "SELECT * FROM projects WHERE id = ?",
@@ -290,12 +315,13 @@ app.put("/api/projects/:id", async (req, res) => {
     if (!cur.rows.length) return res.status(404).json({ error: "없는 프로젝트입니다." });
     const { name, status } = req.body;
     if (!name || !status) return res.status(400).json({ error: "이름과 상태는 필수입니다." });
-    // 보낸 필드만 갱신: 진행 기간은 미전달 시 기존 값 유지
+    // 보낸 필드만 갱신: 진행 기간·태그는 미전달 시 기존 값 유지
     const start_date = req.body.start_date !== undefined ? req.body.start_date : cur.rows[0].start_date;
     const end_date = req.body.end_date !== undefined ? req.body.end_date : cur.rows[0].end_date;
+    const tags = req.body.tags !== undefined ? req.body.tags : cur.rows[0].tags;
     await db.execute({
-      sql: "UPDATE projects SET name = ?, status = ?, start_date = ?, end_date = ? WHERE id = ? AND user_id = ?",
-      args: [name, status, start_date, end_date, req.params.id, req.userId],
+      sql: "UPDATE projects SET name = ?, status = ?, start_date = ?, end_date = ?, tags = ? WHERE id = ? AND user_id = ?",
+      args: [name, status, start_date, end_date, tags, req.params.id, req.userId],
     });
     const updated = await db.execute({
       sql: "SELECT * FROM projects WHERE id = ? AND user_id = ?",
@@ -421,14 +447,14 @@ app.get("/api/schedules", async (req, res) => {
 // 일정 추가 (+ 연동 할일 자동 생성)
 app.post("/api/schedules", async (req, res) => {
   try {
-    const { schedule_date, title, schedule_time = "", project_id = null } = req.body;
+    const { schedule_date, title, schedule_time = "", project_id = null, tags = "" } = req.body;
     if (!schedule_date || !title) {
       return res.status(400).json({ error: "날짜와 일정 내용은 필수입니다." });
     }
     const ts = now();
     const result = await db.execute({
-      sql: `INSERT INTO schedules (schedule_date, schedule_time, title, project_id, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-      args: [schedule_date, schedule_time, title, project_id || null, req.userId, ts],
+      sql: `INSERT INTO schedules (schedule_date, schedule_time, title, project_id, tags, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      args: [schedule_date, schedule_time, title, project_id || null, tags, req.userId, ts],
     });
     const scheduleId = Number(result.lastInsertRowid);
     // 일정 입력과 동시에 연동 할일 생성 (마감일 = 일정 날짜, 프로젝트 연동)
@@ -455,9 +481,10 @@ app.put("/api/schedules/:id", async (req, res) => {
     const title = req.body.title ?? cur.rows[0].title;
     if (!title) return res.status(400).json({ error: "일정 내용은 필수입니다." });
     const schedule_time = req.body.schedule_time !== undefined ? req.body.schedule_time : cur.rows[0].schedule_time;
+    const tags = req.body.tags !== undefined ? req.body.tags : cur.rows[0].tags;
     await db.execute({
-      sql: "UPDATE schedules SET title = ?, schedule_time = ? WHERE id = ? AND user_id = ?",
-      args: [title, schedule_time, req.params.id, req.userId],
+      sql: "UPDATE schedules SET title = ?, schedule_time = ?, tags = ? WHERE id = ? AND user_id = ?",
+      args: [title, schedule_time, tags, req.params.id, req.userId],
     });
     const updated = await db.execute({
       sql: "SELECT * FROM schedules WHERE id = ? AND user_id = ?",
