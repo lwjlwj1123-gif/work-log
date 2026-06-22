@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WORK LOG</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- 로그인 / 회원가입 화면 -->
+  <div id="auth-screen" class="auth-screen" hidden>
+    <div class="auth-card">
+      <h1>WORK LOG</h1>
+      <p class="auth-sub" id="auth-sub">로그인</p>
+      <form id="auth-form">
+        <input type="text" id="auth-username" placeholder="아이디" autocomplete="username" required />
+        <input type="password" id="auth-password" placeholder="비밀번호" autocomplete="current-password" required />
+        <div class="auth-error" id="auth-error" hidden></div>
+        <button type="submit" class="primary" id="auth-submit">로그인</button>
+      </form>
+      <div class="auth-toggle">
+        <span id="auth-toggle-text">계정이 없으신가요?</span>
+        <button type="button" id="auth-toggle-btn">회원가입</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="app" hidden>
+    <header class="topbar">
+      <h1>WORK LOG</h1>
+      <div class="topbar-right">
+        <span class="current-user" id="current-user"></span>
+        <button id="logout-btn">로그아웃</button>
+      </div>
+    </header>
+
+    <section class="calendar">
+      <div class="cal-head">
+        <button id="cal-prev" class="nav-btn">‹</button>
+        <span id="cal-label">—</span>
+        <button id="cal-next" class="nav-btn">›</button>
+        <button id="cal-today" class="nav-btn today">이번 달</button>
+      </div>
+      <div class="cal-weekdays">
+        <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
+      </div>
+      <div class="cal-grid" id="cal-grid"></div>
+    </section>
+
+    <div class="new-entry-bar">
+      <button id="new-btn" class="primary">+ 새 일지</button>
+    </div>
+
+    <nav class="view-nav">
+      <button class="view-tab active" data-view="dash">📊 대시보드</button>
+      <button class="view-tab" data-view="log">📋 일지</button>
+      <button class="view-tab" data-view="projects">📁 프로젝트</button>
+      <button class="view-tab" data-view="todos">✅ 할 일</button>
+    </nav>
+
+    <!-- 일지 뷰 -->
+    <div id="view-log" class="view" hidden>
+      <nav class="period-bar">
+        <div class="period-tabs">
+          <button class="tab active" data-period="week">주간</button>
+          <button class="tab" data-period="month">월간</button>
+          <button class="tab" data-period="quarter">분기</button>
+          <button class="tab" data-period="year">연간</button>
+        </div>
+        <div class="period-nav">
+          <button id="prev" class="nav-btn">‹</button>
+          <span id="period-label">—</span>
+          <button id="next" class="nav-btn">›</button>
+          <button id="today-btn" class="nav-btn today">오늘</button>
+        </div>
+      </nav>
+      <section class="summary" id="summary"></section>
+      <main id="entries" class="entries"></main>
+    </div>
+
+    <!-- 프로젝트 뷰 -->
+    <div id="view-projects" class="view" hidden>
+      <form id="project-form" class="inline-form">
+        <input type="text" id="p-name" placeholder="새 프로젝트 이름" required />
+        <input type="date" id="p-start" title="시작일" />
+        <span class="p-date-sep">~</span>
+        <input type="date" id="p-end" title="종료일" />
+        <button type="submit" class="primary">프로젝트 추가</button>
+      </form>
+      <div id="projects-list" class="projects-list"></div>
+    </div>
+
+    <!-- 할 일 뷰 -->
+    <div id="view-todos" class="view" hidden>
+      <form id="todo-form" class="inline-form">
+        <input type="text" id="t-title" placeholder="할 일을 입력하세요" required />
+        <input type="date" id="t-due" />
+        <select id="t-project"><option value="">프로젝트 없음</option></select>
+        <button type="submit" class="primary">추가</button>
+      </form>
+      <h3 class="section-title">할 일</h3>
+      <div id="todos-todo" class="todos"></div>
+      <h3 class="section-title">진행중</h3>
+      <div id="todos-doing" class="todos"></div>
+      <h3 class="section-title">완료 로그</h3>
+      <div id="todos-done" class="todos done-log"></div>
+    </div>
+    <!-- 대시보드 뷰 -->
+    <div id="view-dash" class="view">
+      <nav class="period-bar">
+        <div class="period-tabs">
+          <button class="dtab" data-period="week">주간</button>
+          <button class="dtab active" data-period="month">월간</button>
+          <button class="dtab" data-period="quarter">분기</button>
+          <button class="dtab" data-period="year">연간</button>
+        </div>
+        <div class="period-nav">
+          <button id="d-prev" class="nav-btn">‹</button>
+          <span id="d-label">—</span>
+          <button id="d-next" class="nav-btn">›</button>
+          <button id="d-today" class="nav-btn today">오늘</button>
+        </div>
+      </nav>
+      <section class="summary" id="dash-stats"></section>
+      <div class="chart-card">
+        <h3 class="chart-title">🏷️ 태그별 사용 횟수</h3>
+        <div class="chart" id="chart-tag-count"></div>
+      </div>
+      <div class="chart-card">
+        <h3 class="chart-title">⏱️ 태그별 투입 시간</h3>
+        <div class="chart" id="chart-tag-time"></div>
+      </div>
+      <div class="chart-card">
+        <h3 class="chart-title">📁 프로젝트별 투입 시간</h3>
+        <div class="chart" id="chart-proj-time"></div>
+      </div>
+      <div class="chart-card">
+        <h3 class="chart-title">📈 기간별 투입 시간 추이</h3>
+        <div class="chart cols" id="chart-trend"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 작성/수정 모달 -->
+  <div class="modal-backdrop" id="modal" hidden>
+    <div class="modal">
+      <h2 id="modal-title">새 일지</h2>
+      <form id="entry-form">
+        <input type="hidden" id="entry-id" />
+        <label>날짜
+          <input type="date" id="f-date" required />
+        </label>
+        <div class="row">
+          <label>시작 시간
+            <div class="time-row">
+              <input type="time" id="f-start" />
+              <button type="button" class="time-now" id="start-now">▶ 시작</button>
+            </div>
+          </label>
+          <label>종료 시간
+            <div class="time-row">
+              <input type="time" id="f-end" />
+              <button type="button" class="time-now" id="end-now">■ 종료</button>
+            </div>
+          </label>
+        </div>
+        <div class="dur-display" id="dur-display">소요 시간: —</div>
+        <label>제목
+          <input type="text" id="f-title" placeholder="무엇을 했나요?" required />
+        </label>
+        <label>연결 프로젝트 <span class="hint">(선택)</span>
+          <select id="f-project"><option value="">프로젝트 없음</option></select>
+        </label>
+        <label>내용
+          <textarea id="f-content" rows="6" placeholder="상세 내용..."></textarea>
+        </label>
+        <label>태그 <span class="hint">(쉼표로 구분 · 이전 태그 자동완성)</span>
+          <div class="tag-input-wrap">
+            <input type="text" id="f-tags" placeholder="예: 개발, 회의, 기획" autocomplete="off" />
+            <div class="tag-suggest" id="tag-suggest" hidden></div>
+          </div>
+        </label>
+        <div class="entry-todos">
+          <label class="et-label">관련 할일 <span class="hint">(이 일지와 연결 · 저장 시 반영)</span></label>
+          <div class="et-add">
+            <input type="text" id="et-new" placeholder="새 할일 추가" autocomplete="off" />
+            <button type="button" id="et-add-btn">+ 추가</button>
+          </div>
+          <div class="et-list" id="et-list"></div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="delete-btn" class="danger" hidden>삭제</button>
+          <span class="spacer"></span>
+          <button type="button" id="cancel-btn">취소</button>
+          <button type="submit" class="primary">저장</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 일정 모달 -->
+  <div class="modal-backdrop" id="sched-modal" hidden>
+    <div class="modal">
+      <h2 id="sched-modal-title">일정</h2>
+      <ul id="sched-list" class="sched-list"></ul>
+      <form id="sched-form">
+        <input type="hidden" id="s-date" />
+        <div class="row">
+          <input type="text" id="s-time" class="s-time-input" placeholder="예: 14:30" autocomplete="off" inputmode="numeric" />
+          <input type="text" id="s-title" placeholder="일정을 입력하세요" required />
+        </div>
+        <div class="row">
+          <select id="s-project" class="s-project-input"><option value="">프로젝트 없음</option></select>
+          <button type="submit" class="primary">추가</button>
+        </div>
+        <div class="sched-hint">추가 시 같은 내용의 할일이 자동으로 등록됩니다.</div>
+      </form>
+      <div class="modal-actions">
+        <span class="spacer"></span>
+        <button type="button" id="sched-close">닫기</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 확인 팝업 -->
+  <div class="modal-backdrop" id="confirm-modal" hidden>
+    <div class="modal confirm-box">
+      <h2 id="confirm-title">확인</h2>
+      <p id="confirm-msg"></p>
+      <div class="modal-actions" id="confirm-actions"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
